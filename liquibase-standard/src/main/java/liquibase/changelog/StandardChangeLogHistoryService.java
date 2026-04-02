@@ -49,6 +49,8 @@ public class StandardChangeLogHistoryService extends AbstractChangeLogHistorySer
     protected static final String LABELS_SIZE = "255";
     protected static final String CONTEXTS_SIZE = "255";
 
+    public static final int MD5_COLUMN_SIZE = 68;
+
     @Override
     public int getPriority() {
         return PRIORITY_DEFAULT;
@@ -130,6 +132,14 @@ public class StandardChangeLogHistoryService extends AbstractChangeLogHistorySer
             boolean hasLiquibase = changeLogTable.getColumn("LIQUIBASE") != null;
             boolean hasContexts = changeLogTable.getColumn("CONTEXTS") != null;
             boolean hasLabels = changeLogTable.getColumn("LABELS") != null;
+            boolean hasSmallChecksum = false;
+            if (!(this.getDatabase() instanceof SQLiteDatabase)) {
+                DataType md5Type = changeLogTable.getColumn("MD5SUM").getType();
+                if (md5Type.getTypeName().toLowerCase().startsWith("varchar") || md5Type.getTypeName().toLowerCase().startsWith("character varying")) {
+                    Integer md5ColumnSize = md5Type.getColumnSize();
+                    hasSmallChecksum = (md5ColumnSize != null) && (md5ColumnSize < MD5_COLUMN_SIZE);
+                }
+            }
             boolean liquibaseColumnNotRightSize = false;
             if (!(this.getDatabase() instanceof SQLiteDatabase)) {
                 DataType type = changeLogTable.getColumn("LIQUIBASE").getType();
@@ -247,6 +257,13 @@ public class StandardChangeLogHistoryService extends AbstractChangeLogHistorySer
                     statementsToExecute.add(new ReorganizeTableStatement(getLiquibaseCatalogName(),
                         getLiquibaseSchemaName(), getDatabaseChangeLogTableName()));
                 }
+            }
+
+            if (hasSmallChecksum) {
+                executor.comment("Modifying size of databasechangelog.md5sum column");
+                statementsToExecute.add(new ModifyDataTypeStatement(getLiquibaseCatalogName(),
+                        getLiquibaseSchemaName(), getDatabaseChangeLogTableName(), "MD5SUM",
+                        charTypeName + "(" + MD5_COLUMN_SIZE + ")"));
             }
 
             //check if any checksum is not using the current version
