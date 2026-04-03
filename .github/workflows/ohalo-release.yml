@@ -1,0 +1,101 @@
+name: Ohalo Release
+
+# Simplified release workflow for Ohalo's Liquibase fork.
+# Downloads artifacts from a build run, re-versions them, and creates a GitHub release.
+
+permissions:
+  contents: write
+  actions: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release (e.g., 5.0.2)"
+        required: true
+      runId:
+        description: "Run ID of the build workflow to get artifacts from"
+        required: true
+      dry_run:
+        description: "Create draft release instead of publishing"
+        required: false
+        type: boolean
+        default: true
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: "17"
+          distribution: "temurin"
+
+      - name: Download build artifacts
+        uses: dawidd6/action-download-artifact@v6
+        with:
+          workflow: build.yml
+          run_id: ${{ inputs.runId }}
+          name: liquibase-artifacts
+          path: download/liquibase-artifacts
+
+      - name: List downloaded artifacts
+        run: ls -la download/liquibase-artifacts/
+
+      - name: Re-version artifacts
+        run: |
+          version="${{ inputs.version }}"
+          branch="${{ github.ref_name }}"
+
+          chmod +x .github/util/re-version.sh
+          .github/util/re-version.sh download/liquibase-artifacts "$version" "$branch"
+
+          echo "Re-versioned artifacts:"
+          ls -la re-version/out/
+
+      - name: Prepare release assets
+        run: |
+          version="${{ inputs.version }}"
+          mkdir -p release-assets
+
+          # Copy the main distribution files
+          cp re-version/out/liquibase-${version}.tar.gz release-assets/liquibase-${version}-ohalo.tar.gz
+          cp re-version/out/liquibase-${version}.zip release-assets/liquibase-${version}-ohalo.zip
+
+          echo "Release assets:"
+          ls -la release-assets/
+
+      - name: Create git tag
+        if: ${{ inputs.dry_run == false }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -f "v${{ inputs.version }}-ohalo"
+          git push -f origin "v${{ inputs.version }}-ohalo"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ inputs.version }}-ohalo
+          name: Liquibase ${{ inputs.version }} (Ohalo Fork)
+          body: |
+            Ohalo's fork of Liquibase ${{ inputs.version }} with SHA256 checksum algorithm support for FIPS compliance.
+
+            ## Changes from upstream
+            - Added `LIQUIBASE_CHECKSUM_ALGORITHM` environment variable support (`MD5` or `SHA256`)
+            - SHA256 algorithm for FIPS 140-2/140-3 compliant deployments
+
+            ## Usage
+            Set `LIQUIBASE_CHECKSUM_ALGORITHM=SHA256` for FIPS-compliant deployments.
+            Default is `MD5` for backward compatibility.
+
+            Based on [Liquibase ${{ inputs.version }}](https://github.com/liquibase/liquibase/releases/tag/v${{ inputs.version }})
+          draft: ${{ inputs.dry_run }}
+          files: release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
