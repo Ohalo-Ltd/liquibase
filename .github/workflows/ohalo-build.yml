@@ -1,0 +1,69 @@
+name: Ohalo Build
+
+# Simplified build workflow for Ohalo's Liquibase fork.
+# Builds the distribution without GPG signing or vault dependencies.
+
+permissions:
+  contents: read
+  actions: read
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: "Branch to build"
+        required: false
+        default: "ohalo/v5.0.2"
+  push:
+    branches:
+      - 'ohalo/**'
+
+jobs:
+  build:
+    name: Build Distribution
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref }}
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: "21"
+          distribution: "temurin"
+          cache: "maven"
+
+      - name: Get branch name
+        id: branch
+        run: |
+          branch_name="${{ inputs.branch || github.ref_name }}"
+          modified_branch_name=$(echo "$branch_name" | tr '/' '_')
+          echo "name=$modified_branch_name" >> $GITHUB_OUTPUT
+
+      - name: Build distribution
+        run: |
+          ./mvnw -B -pl liquibase-dist -am clean package -DskipTests \
+            "-Dbuild.repository.owner=Ohalo-Ltd" \
+            "-Dbuild.repository.name=liquibase" \
+            "-Dbuild.branch=${{ steps.branch.outputs.name }}" \
+            "-Dbuild.number=${{ github.run_number }}" \
+            "-Dbuild.commit=${{ github.sha }}"
+
+      - name: Prepare artifacts
+        run: |
+          mkdir -p artifacts
+          cp liquibase-dist/target/liquibase-*.tar.gz artifacts/
+          cp liquibase-dist/target/liquibase-*.zip artifacts/
+          cp liquibase-core/target/liquibase-core-0-SNAPSHOT.jar artifacts/
+
+          echo "Built artifacts:"
+          ls -la artifacts/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: liquibase-artifacts
+          path: artifacts/*
+          retention-days: 7
