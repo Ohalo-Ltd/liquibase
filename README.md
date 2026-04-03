@@ -1,3 +1,99 @@
+# Liquibase (Ohalo Fork)
+
+> **This is Ohalo's fork of Liquibase with SHA256 checksum algorithm support for FIPS compliance.**
+
+## Ohalo Fork Changes
+
+This fork adds support for configurable checksum algorithms via the `LIQUIBASE_CHECKSUM_ALGORITHM` environment variable:
+
+| Value | Description |
+|-------|-------------|
+| `MD5` | Default, backward compatible with existing deployments |
+| `SHA256` | FIPS 140-2/140-3 compliant, required for FIPS-enabled environments |
+
+Based on [liquibase/liquibase#6431](https://github.com/liquibase/liquibase/pull/6431).
+
+### Usage
+
+```bash
+# For FIPS-compliant deployments
+export LIQUIBASE_CHECKSUM_ALGORITHM=SHA256
+
+# For standard deployments (default)
+export LIQUIBASE_CHECKSUM_ALGORITHM=MD5
+```
+
+**Important**: The checksum algorithm cannot be changed after initial deployment. Liquibase stores checksums in the `DATABASECHANGELOG` table, and changing the algorithm will cause validation failures.
+
+## Release Process
+
+### Prerequisites
+- Java 17+
+- GitHub CLI (`gh`)
+
+### Steps
+
+1. **Trigger a build** on the `ohalo/v5.0.2` branch:
+   ```bash
+   gh workflow run ohalo-build.yml --ref ohalo/v5.0.2 --repo Ohalo-Ltd/liquibase
+   ```
+
+2. **Wait for the build to complete** and note the run ID from the output or GitHub Actions UI.
+
+3. **Download the build artifacts**:
+   ```bash
+   mkdir -p /tmp/liquibase-release
+   cd /tmp/liquibase-release
+   gh run download <RUN_ID> --repo Ohalo-Ltd/liquibase -n liquibase-artifacts -D artifacts
+   ```
+
+4. **Rename artifacts** to match re-version.sh expectations:
+   ```bash
+   mv artifacts/liquibase-0-SNAPSHOT.tar.gz artifacts/liquibase-ohalo_v5.0.2-SNAPSHOT.tar.gz
+   mv artifacts/liquibase-0-SNAPSHOT.zip artifacts/liquibase-ohalo_v5.0.2-SNAPSHOT.zip
+   ```
+
+5. **Run re-version.sh** to update version strings (will fail on missing source JARs, but processes the core JAR):
+   ```bash
+   /path/to/liquibase/.github/util/re-version.sh artifacts 5.0.2 ohalo_v5.0.2
+   ```
+
+6. **Repack the distribution** with the versioned JAR:
+   ```bash
+   mkdir -p dist
+   tar -xzf artifacts/liquibase-ohalo_v5.0.2-SNAPSHOT.tar.gz -C dist
+   cp re-version/out/liquibase-core-5.0.2.jar dist/internal/lib/liquibase-core.jar
+   (cd dist && tar -czf ../liquibase-5.0.2-ohalo.tar.gz *)
+   (cd dist && zip -qr ../liquibase-5.0.2-ohalo.zip *)
+   ```
+
+7. **Verify the version** in the manifest:
+   ```bash
+   unzip -p dist/internal/lib/liquibase-core.jar META-INF/MANIFEST.MF | grep -E "Bundle-Version|Liquibase-Version"
+   # Should show: Liquibase-Version: 5.0.2 and Bundle-Version: 5.0.2
+   ```
+
+8. **Update the GitHub release**:
+   ```bash
+   # Delete old assets
+   gh release delete-asset v5.0.2-ohalo liquibase-5.0.2-ohalo.tar.gz --repo Ohalo-Ltd/liquibase -y
+   gh release delete-asset v5.0.2-ohalo liquibase-5.0.2-ohalo.zip --repo Ohalo-Ltd/liquibase -y
+   
+   # Upload new assets
+   gh release upload v5.0.2-ohalo liquibase-5.0.2-ohalo.tar.gz liquibase-5.0.2-ohalo.zip --repo Ohalo-Ltd/liquibase
+   ```
+
+### Why Re-versioning is Required
+
+The Maven build uses `0-SNAPSHOT` as the version. Without re-versioning, security scanners like Trivy will detect the version as `0.0.0.SNAPSHOT` and incorrectly flag CVEs that were fixed in earlier versions.
+
+The `re-version.sh` script updates:
+- `MANIFEST.MF`: `Liquibase-Version` and `Bundle-Version`
+- `liquibase.build.properties`: `build.version`
+- `pom.properties`: Maven artifact version
+
+---
+
 # Liquibase [![Build and Test](https://github.com/liquibase/liquibase/actions/workflows/run-tests.yml/badge.svg)](https://github.com/liquibase/liquibase/actions/workflows/run-tests.yml) [![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=liquibase&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=liquibase)
 <p align="center"><img src="https://github.com/liquibase/liquibase/blob/master/Liquibase.png" width="30%" height="30%"></p>
 
